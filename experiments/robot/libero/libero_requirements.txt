@@ -1,5 +1,5 @@
 imageio[ffmpeg]
-robosuite==1.4.1
+robosuite @ git+https://github.com/mimimimi2002/robosuite.git@my-v1.4.0
 bddl
 easydict
 cloudpickle

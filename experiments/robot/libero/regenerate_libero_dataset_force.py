@@ -27,6 +27,16 @@ import argparse
 import json
 import os
 import time
+from dataclasses import dataclass
+import draccus
+from typing import Optional, Union
+from pathlib import Path
+from experiments.robot.robot_utils import (
+    get_model,
+    get_image_resize_size
+)
+from experiments.robot.openvla_utils import get_processor
+
 
 import h5py
 import numpy as np
@@ -37,13 +47,49 @@ from libero.libero import benchmark
 from experiments.robot.libero.libero_utils import (
     get_libero_dummy_action,
     get_libero_env,
+    get_libero_image
 )
-
-from experiments.robot.libero.run_libero_eval import get_predicted_vla_action
 
 from experiments.robot.openvla_utils import get_vla_action
 
 IMAGE_RESOLUTION = 256
+
+@dataclass
+class RegenerateConfig:
+    # fmt: off
+
+    #################################################################################################################
+    # Model-specific parameters
+    #################################################################################################################
+    model_family: str = "openvla"                    # Model family
+    pretrained_checkpoint: Union[str, Path] = ""     # Pretrained checkpoint path
+    load_in_8bit: bool = False                       # (For OpenVLA only) Load with 8-bit quantization
+    load_in_4bit: bool = False                       # (For OpenVLA only) Load with 4-bit quantization
+
+    center_crop: bool = True                         # Center crop? (if trained w/ random crop image aug)
+    libero_target_dir: str = "/home/miki/openvla/dummy_dataset"
+    libero_raw_data_dir: str = "/home/miki/LIBERO/libero_dataset/datasets/libero_spatial"
+
+    #################################################################################################################
+    # LIBERO environment-specific parameters
+    #################################################################################################################
+    task_suite_name: str = "libero_spatial"          # Task suite. Options: libero_spatial, libero_object, libero_goal, libero_10, libero_90
+    num_steps_wait: int = 10                         # Number of steps to wait for objects to stabilize in sim
+    num_trials_per_task: int = 50                    # Number of rollouts per task
+
+    #################################################################################################################
+    # Utils
+    #################################################################################################################
+    run_id_note: Optional[str] = None                # Extra note to add in run ID for logging
+    local_log_dir: str = "./experiments/logs"        # Local directory for eval logs
+
+    use_wandb: bool = False                          # Whether to also log results in Weights & Biases
+    wandb_project: str = "YOUR_WANDB_PROJECT"        # Name of W&B project to log to (use default!)
+    wandb_entity: str = "YOUR_WANDB_ENTITY"          # Name of entity to log under
+
+    seed: int = 7                                    # Random Seed (for reproducibility)
+
+    # fmt: on
 
 
 def is_noop(action, prev_action=None, threshold=1e-4):
@@ -70,26 +116,28 @@ def is_noop(action, prev_action=None, threshold=1e-4):
     prev_gripper_action = prev_action[-1]
     return np.linalg.norm(action[:-1]) < threshold and gripper_action == prev_gripper_action
 
-def main(args):
-    print(f"Regenerating {args.libero_task_suite} dataset!")
+@draccus.wrap()
+def main(cfg: RegenerateConfig):
+    print(f"Regenerating {cfg.task_suite_name} dataset!")
+    cfg.unnorm_key = cfg.task_suite_name
 
     # Create target directory
-    if os.path.isdir(args.libero_target_dir):
-        user_input = input(f"Target directory already exists at path: {args.libero_target_dir}\nEnter 'y' to overwrite the directory, or anything else to exit: ")
+    if os.path.isdir(cfg.libero_target_dir):
+        user_input = input(f"Target directory already exists at path: {cfg.libero_target_dir}\nEnter 'y' to overwrite the directory, or anything else to exit: ")
         if user_input != 'y':
             exit()
-    os.makedirs(args.libero_target_dir, exist_ok=True)
+    os.makedirs(cfg.libero_target_dir, exist_ok=True)
 
     # Prepare JSON file to record success/false and initial states per episode
     metainfo_json_dict = {}
-    metainfo_json_out_path = f"./experiments/robot/libero/{args.libero_task_suite}_metainfo.json"
+    metainfo_json_out_path = f"./experiments/robot/libero/{cfg.task_suite_name}_metainfo.json"
     with open(metainfo_json_out_path, "w") as f:
         # Just test that we can write to this file (we overwrite it later)
         json.dump(metainfo_json_dict, f)
 
     # Get task suite
     benchmark_dict = benchmark.get_benchmark_dict()
-    task_suite = benchmark_dict[args.libero_task_suite]()
+    task_suite = benchmark_dict[cfg.task_suite_name]()
     num_tasks_in_suite = task_suite.n_tasks
 
     # Setup
@@ -103,13 +151,13 @@ def main(args):
         env, task_description = get_libero_env(task, "llava", resolution=IMAGE_RESOLUTION)
 
         # Get dataset for task
-        orig_data_path = os.path.join(args.libero_raw_data_dir, f"{task.name}_demo.hdf5")
+        orig_data_path = os.path.join(cfg.libero_raw_data_dir, f"{task.name}_demo.hdf5")
         assert os.path.exists(orig_data_path), f"Cannot find raw data file {orig_data_path}."
         orig_data_file = h5py.File(orig_data_path, "r")
         orig_data = orig_data_file["data"]
 
         # Create new HDF5 file for regenerated demos
-        new_data_path = os.path.join(args.libero_target_dir, f"{task.name}_demo.hdf5")
+        new_data_path = os.path.join(cfg.libero_target_dir, f"{task.name}_demo.hdf5")
         new_data_file = h5py.File(new_data_path, "w")
         grp = new_data_file.create_group("data")
 
@@ -149,17 +197,36 @@ def main(args):
                     num_noops += 1
                     continue
 
+                resize_size = get_image_resize_size(cfg)
+                img = get_libero_image(obs, resize_size)
                 if states == []:
                     # In the first timestep, since we're using the original initial state to initialize the environment,
                     # copy the initial state (first state in episode) over from the original HDF5 to the new one
                     states.append(orig_states[0])
                     robot_states.append(demo_data["robot_states"][0])
+                    observation = {
+                        "full_image": img,
+                        "state": demo_data["robot_states"][0]
+                    }
                 else:
                     # For all other timesteps, get state from environment and record it
                     states.append(env.sim.get_state().flatten())
                     robot_states.append(
                         np.concatenate([obs["robot0_gripper_qpos"], obs["robot0_eef_pos"], obs["robot0_eef_quat"]])
                     )
+                    observation = {
+                        "full_image": img,
+                        "state": np.concatenate([obs["robot0_gripper_qpos"], obs["robot0_eef_pos"], obs["robot0_eef_quat"]])
+                    }
+                
+                # now we get the states and image? and can predict action using policy
+                predicted_action = get_predicted_vla_action(
+                    cfg, observation, task_description
+                )
+                
+                print("predicted_action")
+                print(predicted_action)
+                print(action)
 
                 # Record original action (from demo)
                 actions.append(action)
@@ -252,20 +319,19 @@ def main(args):
         new_data_file.close()
         print(f"Saved regenerated demos for task '{task_description}' at: {new_data_path}")
 
-    print(f"Dataset regeneration complete! Saved new dataset at: {args.libero_target_dir}")
+    print(f"Dataset regeneration complete! Saved new dataset at: {cfg.libero_target_dir}")
     print(f"Saved metainfo JSON at: {metainfo_json_out_path}")
 
-
+def get_predicted_vla_action(cfg: RegenerateConfig, obs, task_description):
+    # Load model
+    model = get_model(cfg)
+    processor = get_processor(cfg)
+    predicted_action = get_vla_action(
+        model, processor, cfg.pretrained_checkpoint, obs, task_description, cfg.unnorm_key, center_crop=cfg.center_crop
+    )
+        
+    return predicted_action
+    
 if __name__ == "__main__":
-    # Parse command-line arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--libero_task_suite", type=str, choices=["libero_spatial", "libero_object", "libero_goal", "libero_10", "libero_90"],
-                        help="LIBERO task suite. Example: libero_spatial", required=True)
-    parser.add_argument("--libero_raw_data_dir", type=str,
-                        help="Path to directory containing raw HDF5 dataset. Example: ./LIBERO/libero/datasets/libero_spatial", required=True)
-    parser.add_argument("--libero_target_dir", type=str,
-                        help="Path to regenerated dataset directory. Example: ./LIBERO/libero/datasets/libero_spatial_no_noops", required=True)
-    args = parser.parse_args()
-
     # Start data regeneration
-    main(args)
+    main()

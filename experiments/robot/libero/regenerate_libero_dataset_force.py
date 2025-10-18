@@ -51,45 +51,19 @@ from experiments.robot.libero.libero_utils import (
 )
 
 from experiments.robot.openvla_utils import get_vla_action
+from experiments.robot.libero.run_libero_eval import GenerateConfig
 
 IMAGE_RESOLUTION = 256
 
 @dataclass
-class RegenerateConfig:
+class RegenerateConfig(GenerateConfig):
     # fmt: off
 
     #################################################################################################################
     # Model-specific parameters
     #################################################################################################################
-    model_family: str = "openvla"                    # Model family
-    pretrained_checkpoint: Union[str, Path] = ""     # Pretrained checkpoint path
-    load_in_8bit: bool = False                       # (For OpenVLA only) Load with 8-bit quantization
-    load_in_4bit: bool = False                       # (For OpenVLA only) Load with 4-bit quantization
-
-    center_crop: bool = True                         # Center crop? (if trained w/ random crop image aug)
     libero_target_dir: str = "/home/miki/openvla/dummy_dataset"
     libero_raw_data_dir: str = "/home/miki/LIBERO/libero_dataset/datasets/libero_spatial"
-
-    #################################################################################################################
-    # LIBERO environment-specific parameters
-    #################################################################################################################
-    task_suite_name: str = "libero_spatial"          # Task suite. Options: libero_spatial, libero_object, libero_goal, libero_10, libero_90
-    num_steps_wait: int = 10                         # Number of steps to wait for objects to stabilize in sim
-    num_trials_per_task: int = 50                    # Number of rollouts per task
-
-    #################################################################################################################
-    # Utils
-    #################################################################################################################
-    run_id_note: Optional[str] = None                # Extra note to add in run ID for logging
-    local_log_dir: str = "./experiments/logs"        # Local directory for eval logs
-
-    use_wandb: bool = False                          # Whether to also log results in Weights & Biases
-    wandb_project: str = "YOUR_WANDB_PROJECT"        # Name of W&B project to log to (use default!)
-    wandb_entity: str = "YOUR_WANDB_ENTITY"          # Name of entity to log under
-
-    seed: int = 7                                    # Random Seed (for reproducibility)
-
-    # fmt: on
 
 
 def is_noop(action, prev_action=None, threshold=1e-4):

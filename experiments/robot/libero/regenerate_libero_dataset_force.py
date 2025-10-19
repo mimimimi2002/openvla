@@ -62,7 +62,7 @@ class RegenerateConfig(GenerateConfig):
     #################################################################################################################
     # Model-specific parameters
     #################################################################################################################
-    libero_target_dir: str = "/home/miki/openvla/predicted_force_dataset"
+    libero_target_dir: str = "/home/miki/openvla/dummy_data"
     libero_raw_data_dir: str = "/home/miki/LIBERO/libero_dataset/datasets/libero_spatial"
 
 
@@ -93,7 +93,7 @@ def is_noop(action, prev_action=None, threshold=1e-4):
 @draccus.wrap()
 def main(cfg: RegenerateConfig):
     print(f"Regenerating {cfg.task_suite_name} dataset!")
-    cfg.unnorm_key = cfg.task_suite_name
+    cfg.unnorm_key = "bridge_orig"
 
     # Create target directory
     if os.path.isdir(cfg.libero_target_dir):
@@ -164,7 +164,7 @@ def main(cfg: RegenerateConfig):
 
 
             # Replay original demo actions in environment and record observations
-            for _, action in enumerate(orig_actions):
+            for frame_index, action in enumerate(orig_actions):
                 # Skip transitions with no-op actions
                 prev_action = actions[-1] if len(actions) > 0 else None
                 if is_noop(action, prev_action):
@@ -199,7 +199,7 @@ def main(cfg: RegenerateConfig):
                     cfg, observation, task_description
                 )
                 
-                print("predicted_actions", predicted_action, action)
+                print(task_description + " demo" + str(i) + " frame index" + str(frame_index) +  " predicted_actions", predicted_action, action)
                 
                 predicted_actions.append(predicted_action)
 
@@ -227,8 +227,6 @@ def main(cfg: RegenerateConfig):
 
                 # Execute demo action in environment
                 obs, reward, done, info = env.step(action.tolist())
-                print("obs")
-                print(obs)
 
             # At end of episode, save replayed trajectories to new HDF5 files (only keep successes)
             if done:

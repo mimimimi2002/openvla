@@ -62,7 +62,7 @@ class RegenerateConfig(GenerateConfig):
     #################################################################################################################
     # Model-specific parameters
     #################################################################################################################
-    libero_target_dir: str = "/home/miki/openvla/dummy_dataset"
+    libero_target_dir: str = "/home/miki/openvla/predicted_force_dataset"
     libero_raw_data_dir: str = "/home/miki/LIBERO/libero_dataset/datasets/libero_spatial"
 
 
@@ -150,6 +150,7 @@ def main(cfg: RegenerateConfig):
             # Set up new data lists
             states = []
             actions = []
+            predicted_actions = []
             ee_states = []
             gripper_states = []
             joint_states = []
@@ -198,9 +199,9 @@ def main(cfg: RegenerateConfig):
                     cfg, observation, task_description
                 )
                 
-                print("predicted_action")
-                print(predicted_action)
-                print(action)
+                print("predicted_actions", predicted_action, action)
+                
+                predicted_actions.append(predicted_action)
 
                 # Record original action (from demo)
                 actions.append(action)
@@ -256,6 +257,7 @@ def main(cfg: RegenerateConfig):
 
                 obs_grp.create_dataset("finger2_pad_collision", data=np.stack(finger2_pad_collisions, axis=0))
                 ep_data_grp.create_dataset("actions", data=actions)
+                ep_data_grp.create_dataset("predicted_actions", data=predicted_actions)
                 ep_data_grp.create_dataset("states", data=np.stack(states))
                 ep_data_grp.create_dataset("robot_states", data=np.stack(robot_states, axis=0))
                 ep_data_grp.create_dataset("rewards", data=rewards)

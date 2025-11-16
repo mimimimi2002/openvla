@@ -76,6 +76,7 @@ class GenerateConfig:
 class RolloutWorkerOpenVLA():
     def __init__(self, cfg: GenerateConfig):
         self.cfg = cfg
+        self.cfg.unnorm_key = cfg.task_suite_name
         self.model = get_model(cfg)
         self.model_family = cfg.model_family
         self.processor = get_processor(cfg)
@@ -166,20 +167,44 @@ class RolloutWorkerOpenVLA():
         for task_id in range(self.rollout_batch_size):
             self.reset_rollout(task_id, episode_id)
     
-    def warm_up_env(self, task_id):
-      self.reset_rollout(task_id, 0) # episode index = 0
+    def warm_up_env(self, task_id, episode_id):
+      self.reset_rollout(task_id, episode_id)
       t = 0
       if t < self.num_steps_wait:
         obs, reward, done, info = self.envs[task_id].step(get_libero_dummy_action(self.model_family))
         t += 1
       
       return obs
+            
+    def get_action(self, task_id, episode_id, obs):
+      
+      img = get_libero_image(obs, self.resize_size)
+      
+      task_description = self.task_descriptions[task_id]
+      
+      observation = {
+          "full_image": img,
+          "state": np.concatenate(
+              (obs["robot0_eef_pos"], quat2axisangle(obs["robot0_eef_quat"]), obs["robot0_gripper_qpos"])
+          ),
+      }
+      action = get_action(
+          self.cfg,
+          self.model,
+          observation,
+          task_description,
+          processor=self.processor,
+      )
+      return action
 
 @draccus.wrap()
 def main(cfg: GenerateConfig):
+  task_id = 0
+  episode_id = 0
   openvla_rollout_worker = RolloutWorkerOpenVLA(cfg)  
-  obs = openvla_rollout_worker.warm_up_env(0)
-  print(obs)
+  obs = openvla_rollout_worker.warm_up_env(task_id, episode_id)
+  action = openvla_rollout_worker.get_action(task_id, episode_id, obs)
+  print(action)
   
   
 if __name__ == "__main__":

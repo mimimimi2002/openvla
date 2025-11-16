@@ -77,11 +77,12 @@ class RolloutWorkerOpenVLA():
     def __init__(self, cfg: GenerateConfig):
         self.cfg = cfg
         self.model = get_model(cfg)
+        self.model_family = cfg.model_family
         self.processor = get_processor(cfg)
-        self.task_suite = self.get_task_suite(cfg)
+        self.task_suite = self.get_task_suite()
         self.num_tasks_in_suite = self.task_suite.n_tasks
         self.resize_size = get_image_resize_size(cfg)
-        self.envs, self.task_descriptions = self.make_all_envs(cfg)
+        self.envs, self.task_descriptions = self.make_all_envs()
         self.rollout_batch_size = self.num_tasks_in_suite
         self.initial_obs = [None] * self.rollout_batch_size
         self.initial_achieved_goal = [None] * self.rollout_batch_size
@@ -89,34 +90,48 @@ class RolloutWorkerOpenVLA():
         self.libero_raw_data_dir = cfg.libero_raw_data_dir
         self.task_desired_goals = self.get_task_desired_goals_json()
         self.task_suite_name = cfg.task_suite_name
+        self.num_steps_wait = cfg.num_steps_wait
         self.reset_all_rollouts(0)
-    
+        
+        if cfg.task_suite_name == "libero_spatial":
+                max_steps = 220  # longest training demo has 193 steps
+        elif cfg.task_suite_name == "libero_object":
+            max_steps = 280  # longest training demo has 254 steps
+        elif cfg.task_suite_name == "libero_goal":
+            max_steps = 300  # longest training demo has 270 steps
+        elif cfg.task_suite_name == "libero_10":
+            max_steps = 520  # longest training demo has 505 steps
+        elif cfg.task_suite_name == "libero_90":
+            max_steps = 400  # longest training demo has 373 steps
+        
+        self.T = max_steps
+
     def get_task_desired_goals_json(self):
       with open("/home/miki/openvla/data/spatial_task_desired_goals.json", "r") as f:
         data = json.load(f)
         return data
         
-    def get_task_suite(self, cfg: GenerateConfig):
+    def get_task_suite(self):
       benchmark_dict = benchmark.get_benchmark_dict()
-      return benchmark_dict[cfg.task_suite_name]()
+      return benchmark_dict[self.cfg.task_suite_name]()
     
-    def make_all_envs(self, cfg: GenerateConfig):
+    def make_all_envs(self):
       envs = []
       task_descriptions = []
       for task_id in range(self.num_tasks_in_suite):
         task = self.task_suite.get_task(task_id)
-        env, task_description = get_libero_env(task, cfg.model_family, resolution=256)
+        env, task_description = get_libero_env(task, self.model_family, resolution=256)
         envs.append(env)
         task_descriptions.append(task_description)
       
       return envs, task_descriptions
     
-    def reset_rollout(self, task_idx, episode_idx):
-      task = self.task_suite.get_task(task_idx)
-      task_description = "_".join(self.task_descriptions[task_idx].split(" "))
+    def reset_rollout(self, task_id, episode_id):
+      task = self.task_suite.get_task(task_id)
+      task_description = "_".join(self.task_descriptions[task_id].split(" "))
       
       # ex {'akita_black_bowl_1_main': [0.061956970218480775, 0.19921577625065975, 0.9075433073452307]}
-      desired_goal_dict = self.task_desired_goals[task_description][episode_idx]
+      desired_goal_dict = self.task_desired_goals[task_description][episode_id]
       
       # akita_black_bowl_1_main
       target_object = list(desired_goal_dict.keys())[0]
@@ -124,7 +139,7 @@ class RolloutWorkerOpenVLA():
       # [0.061956970218480775, 0.19921577625065975, 0.9075433073452307]
       desired_goal_pos = list(desired_goal_dict.values())[0]
       
-      self.initial_desired_goal[task_idx] = desired_goal_pos
+      self.initial_desired_goal[task_id] = desired_goal_pos
             
       # target nameの取り出し方はlibero taskによって違う
       if self.task_suite_name == "libero_spatial":
@@ -136,26 +151,35 @@ class RolloutWorkerOpenVLA():
       orig_data_file = h5py.File(orig_data_path, "r")
       orig_data = orig_data_file["data"]
       
-      demo_data = orig_data[f"demo_{episode_idx}"]
+      demo_data = orig_data[f"demo_{episode_id}"]
       orig_actions = demo_data["actions"][()]
       orig_states = demo_data["states"][()]
             
-      self.envs[task_idx].reset()
-      obs = self.envs[task_idx].set_init_state(orig_states[0])      
-      self.initial_obs[task_idx] = obs
-      self.initial_achieved_goal[task_idx] = obs[target_object_pos] 
+      self.envs[task_id].reset()
+      obs = self.envs[task_id].set_init_state(orig_states[0])      
+      self.initial_obs[task_id] = obs
+      self.initial_achieved_goal[task_id] = obs[target_object_pos] 
       
-    def reset_all_rollouts(self, episode_idx):
+    def reset_all_rollouts(self, episode_id):
         """Resets all `rollout_batch_size` rollout workers.
         """
-        for task_idx in range(self.rollout_batch_size):
-            self.reset_rollout(task_idx, episode_idx)
-
-
+        for task_id in range(self.rollout_batch_size):
+            self.reset_rollout(task_id, episode_id)
+    
+    def warm_up_env(self, task_id):
+      self.reset_rollout(task_id, 0) # episode index = 0
+      t = 0
+      if t < self.num_steps_wait:
+        obs, reward, done, info = self.envs[task_id].step(get_libero_dummy_action(self.model_family))
+        t += 1
+      
+      return obs
 
 @draccus.wrap()
 def main(cfg: GenerateConfig):
   openvla_rollout_worker = RolloutWorkerOpenVLA(cfg)  
+  obs = openvla_rollout_worker.warm_up_env(0)
+  print(obs)
   
   
 if __name__ == "__main__":

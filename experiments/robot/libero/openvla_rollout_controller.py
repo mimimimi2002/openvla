@@ -85,9 +85,10 @@ class RolloutWorkerOpenVLA():
         self.rollout_batch_size = self.num_tasks_in_suite
         self.initial_obs = [None] * self.rollout_batch_size
         self.initial_achieved_goal = [None] * self.rollout_batch_size
-        self.initial_desired_goal = None
+        self.initial_desired_goal = [None] * self.rollout_batch_size
         self.libero_raw_data_dir = cfg.libero_raw_data_dir
         self.task_desired_goals = self.get_task_desired_goals_json()
+        self.task_suite_name = cfg.task_suite_name
         self.reset_all_rollouts(0)
     
     def get_task_desired_goals_json(self):
@@ -114,10 +115,21 @@ class RolloutWorkerOpenVLA():
       task = self.task_suite.get_task(task_idx)
       task_description = "_".join(self.task_descriptions[task_idx].split(" "))
       
-      print("task_description", task_description)
+      # ex {'akita_black_bowl_1_main': [0.061956970218480775, 0.19921577625065975, 0.9075433073452307]}
+      desired_goal_dict = self.task_desired_goals[task_description][episode_idx]
       
-      # need to be fixed
-      desired_goal = self.task_desired_goals[task_description][0][episode_idx]
+      # akita_black_bowl_1_main
+      target_object = list(desired_goal_dict.keys())[0]
+      
+      # [0.061956970218480775, 0.19921577625065975, 0.9075433073452307]
+      desired_goal_pos = list(desired_goal_dict.values())[0]
+      
+      self.initial_desired_goal[task_idx] = desired_goal_pos
+            
+      # target nameの取り出し方はlibero taskによって違う
+      if self.task_suite_name == "libero_spatial":
+        # akita_black_bowl_1_pos
+        target_object_pos = target_object.replace("_main", "_pos")
       
       orig_data_path = os.path.join(self.libero_raw_data_dir, f"{task.name}_demo.hdf5")
       assert os.path.exists(orig_data_path), f"Cannot find raw data file {orig_data_path}."
@@ -129,10 +141,9 @@ class RolloutWorkerOpenVLA():
       orig_states = demo_data["states"][()]
             
       self.envs[task_idx].reset()
-      obs = self.envs[task_idx].set_init_state(orig_states[0])
-      
+      obs = self.envs[task_idx].set_init_state(orig_states[0])      
       self.initial_obs[task_idx] = obs
-      
+      self.initial_achieved_goal[task_idx] = obs[target_object_pos] 
       
     def reset_all_rollouts(self, episode_idx):
         """Resets all `rollout_batch_size` rollout workers.

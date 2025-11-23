@@ -259,11 +259,15 @@ def step(request: dict):
     return {"obs": obs, "reward": reward, "done": done, "info": info}
 
 @app.post("/get_base_action")
-def get_base_action(request: dict):
-    obs = request["obs"]
-    task_description = request["task_description"]
-    action = openvla_worker.get_action(0, 0, obs)
-    return {"action": action.tolist()}
+async def get_base_action(request: Request):
+    body = await request.body()
+    payload_dict = pickle.loads(body)
+    task_id = payload_dict["task_id"]
+    episode_id = payload_dict["episode_id"]
+    obs = payload_dict["obs"]
+    action = openvla_worker.get_action(task_id, episode_id, obs)
+    response_bytes = pickle.dumps({"action": action})
+    return Response(content=response_bytes, media_type="application/octet-stream")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

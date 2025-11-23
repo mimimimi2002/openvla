@@ -138,9 +138,14 @@ class RolloutWorkerOpenVLA():
       target_object = list(desired_goal_dict.keys())[0]
       
       # [0.061956970218480775, 0.19921577625065975, 0.9075433073452307]
-      desired_goal_pos = list(desired_goal_dict.values())[0]
+      desired_goal = list(desired_goal_dict.values())[0]
       
-      self.initial_desired_goal[task_id] = desired_goal_pos
+      # target nameの取り出し方はlibero taskによって違う
+      if self.task_suite_name == "libero_spatial":
+        # akita_black_bowl_1_pos
+        target_object_pos = target_object.replace("_main", "_pos")
+                  
+      self.initial_desired_goal[task_id] = desired_goal
             
       # target nameの取り出し方はlibero taskによって違う
       if self.task_suite_name == "libero_spatial":
@@ -157,9 +162,10 @@ class RolloutWorkerOpenVLA():
       orig_states = demo_data["states"][()]
             
       self.envs[task_id].reset()
-      obs = self.envs[task_id].set_init_state(orig_states[0])      
-      self.initial_obs[task_id] = obs
-      self.initial_achieved_goal[task_id] = obs[target_object_pos] 
+      initial_obs = self.envs[task_id].set_init_state(orig_states[0])
+      initial_achieved_goal = initial_obs[target_object_pos]
+      self.initial_achieved_goal = initial_achieved_goal
+      return initial_obs, desired_goal, initial_achieved_goal
       
     def reset_all_rollouts(self, episode_id):
         """Resets all `rollout_batch_size` rollout workers.
@@ -239,11 +245,21 @@ openvla_worker = main()  # 既存の OpenVLA worker
 @app.post("/reset")
 async def reset(request: Request):
     body = await request.json()
-    env_id = body["env_id"]
-    obs = openvla_worker.envs[env_id].reset()
-    payload = pickle.dumps(obs)
-    return Response(content=payload, media_type="application/octet-stream")
+    task_id = body["task_id"]
+    episode_id = body["episode_id"]
+    
+    initial_obs, desired_goal, initial_achieved_goal = openvla_worker.reset_rollout(task_id, episode_id)  
+    payload = {
+        "initial_obs": initial_obs,
+        "desired_goal": desired_goal,
+        "initial_achieved_goal": initial_achieved_goal,
+    }
 
+    return Response(
+        content=pickle.dumps(payload),
+        media_type="application/octet-stream",
+    )
+    
 @app.post("/set_init_state")
 def set_init_state(request: dict):
     env_id = request["env_id"]

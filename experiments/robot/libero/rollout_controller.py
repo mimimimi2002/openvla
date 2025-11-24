@@ -144,13 +144,9 @@ class RolloutWorkerOpenVLA():
       if self.task_suite_name == "libero_spatial":
         # akita_black_bowl_1_pos
         target_object_pos = target_object.replace("_main", "_pos")
+        target_object_quat = target_object.replace("_main", "_quat")
                   
       self.initial_desired_goal[task_id] = desired_goal
-            
-      # target nameの取り出し方はlibero taskによって違う
-      if self.task_suite_name == "libero_spatial":
-        # akita_black_bowl_1_pos
-        target_object_pos = target_object.replace("_main", "_pos")
       
       orig_data_path = os.path.join(self.libero_raw_data_dir, f"{task.name}_demo.hdf5")
       assert os.path.exists(orig_data_path), f"Cannot find raw data file {orig_data_path}."
@@ -163,7 +159,7 @@ class RolloutWorkerOpenVLA():
             
       self.envs[task_id].reset()
       initial_obs = self.envs[task_id].set_init_state(orig_states[0])
-      initial_achieved_goal = initial_obs[target_object_pos]
+      initial_achieved_goal = np.concatenate([initial_obs[target_object_pos], initial_obs[target_object_quat]])
       self.initial_achieved_goal = initial_achieved_goal
       return initial_obs, desired_goal, initial_achieved_goal
       

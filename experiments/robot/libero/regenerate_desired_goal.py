@@ -206,7 +206,11 @@ def main(args):
                     if dist > 1e-2: # 1cm
                         moved_objects.append(obj_name)
                 
-                desired_goals.append({moved_objects[0]: final_obj_pos[moved_objects[0]].tolist()})
+                pos = env.sim.data.get_body_xpos(moved_objects[0]).copy()
+                quat = env.sim.data.get_body_xquat(moved_objects[0]).copy()  # ここで回転を取得
+                desired_goals.append({moved_objects[0]: np.concatenate([pos, quat]).tolist()})
+                print(moved_objects[0])
+                print(np.concatenate([pos, quat]).tolist())
                                 
                 dones = np.zeros(len(actions)).astype(np.uint8)
                 dones[-1] = 1

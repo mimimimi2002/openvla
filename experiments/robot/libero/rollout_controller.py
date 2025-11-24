@@ -161,7 +161,7 @@ class RolloutWorkerOpenVLA():
       initial_obs = self.envs[task_id].set_init_state(orig_states[0])
       initial_achieved_goal = np.concatenate([initial_obs[target_object_pos], initial_obs[target_object_quat]])
       self.initial_achieved_goal = initial_achieved_goal
-      return initial_obs, desired_goal, initial_achieved_goal
+      return initial_obs, desired_goal, initial_achieved_goal, target_object
       
     def reset_all_rollouts(self, episode_id):
         """Resets all `rollout_batch_size` rollout workers.
@@ -244,11 +244,12 @@ async def reset(request: Request):
     task_id = body["task_id"]
     episode_id = body["episode_id"]
     
-    initial_obs, desired_goal, initial_achieved_goal = openvla_worker.reset_rollout(task_id, episode_id)  
+    initial_obs, desired_goal, initial_achieved_goal, target_object = openvla_worker.reset_rollout(task_id, episode_id)  
     payload = {
         "initial_obs": initial_obs,
         "desired_goal": desired_goal,
         "initial_achieved_goal": initial_achieved_goal,
+        "target_object": target_object,
     }
 
     return Response(

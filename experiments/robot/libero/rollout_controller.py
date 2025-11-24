@@ -265,11 +265,14 @@ def set_init_state(request: dict):
     return {"obs": obs}
 
 @app.post("/step")
-def step(request: dict):
-    env_id = request["env_id"]
-    action = request["action"]
+async def step(request: Request):
+    body = await request.body()
+    payload_dict = pickle.loads(body)
+    env_id = payload_dict["env_id"]
+    action = payload_dict["action"]
     obs, reward, done, info = openvla_worker.envs[env_id].step(action)
-    return {"obs": obs, "reward": reward, "done": done, "info": info}
+    response_bytes = pickle.dumps({"obs": obs, "reward": reward, "done": done, "info": info})
+    return Response(content=response_bytes, media_type="application/octet-stream")
 
 @app.post("/get_base_action")
 async def get_base_action(request: Request):
